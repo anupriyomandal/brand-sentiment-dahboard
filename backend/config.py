@@ -31,16 +31,31 @@ TOPICS = (
 )
 
 
+def normalize_database_url(raw_url: str) -> str:
+    """Normalize Railway/Postgres URLs to the SQLAlchemy psycopg dialect."""
+
+    url = raw_url.strip()
+    if not url:
+        return "sqlite:///./tyre_intelligence.db"
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://") and "+psycopg" not in url:
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
 @dataclass(slots=True)
 class Settings:
     """Settings loaded from environment variables."""
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
     openai_model: str = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    database_url: str = os.getenv(
-        "DATABASE_URL",
-        "sqlite:///./tyre_intelligence.db",
-    ).strip()
+    database_url: str = normalize_database_url(
+        os.getenv(
+            "DATABASE_URL",
+            "sqlite:///./tyre_intelligence.db",
+        )
+    )
     redis_url: str = os.getenv("REDIS_URL", "").strip()
     request_timeout: int = 30
     google_news_rss_base_url: str = "https://news.google.com/rss/search"
