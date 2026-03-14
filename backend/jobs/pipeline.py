@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
@@ -56,7 +57,14 @@ def run_hourly_pipeline(db: Session, limit_per_brand: int = 100) -> list[Analyse
                 progress.processed += 1
                 run.total_processed += 1
 
-                exists = db.execute(select(Article.id).where(Article.url == article.url)).scalar_one_or_none()
+                exists = db.execute(
+                    select(Article.id).where(
+                        or_(
+                            Article.url == article.url,
+                            and_(Article.headline == article.headline, Article.source == article.source),
+                        )
+                    )
+                ).scalar_one_or_none()
                 if exists:
                     progress.updated_at = datetime.now(UTC)
                     db.commit()
@@ -89,7 +97,25 @@ def run_hourly_pipeline(db: Session, limit_per_brand: int = 100) -> list[Analyse
                     )
                 )
                 progress.updated_at = datetime.now(UTC)
-                db.commit()
+                try:
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    progress = db.get(PipelineBrandProgress, progress.id)
+                    run = db.get(PipelineRun, run.id)
+                    if progress is not None:
+                        progress.added = max(progress.added - 1, 0)
+                        progress.updated_at = datetime.now(UTC)
+                    if run is not None:
+                        run.total_added = max(run.total_added - 1, 0)
+                    db.commit()
+                    logger.info(
+                        "Pipeline run %s: skipped duplicate article for %s (%s)",
+                        run.id if run is not None else "unknown",
+                        article.brand,
+                        article.headline,
+                    )
+                    continue
 
             progress.status = "completed"
             progress.updated_at = datetime.now(UTC)
@@ -115,6 +141,8 @@ def run_hourly_pipeline(db: Session, limit_per_brand: int = 100) -> list[Analyse
         )
         return analysed
     except Exception as exc:
+        db.rollback()
+        run = db.get(PipelineRun, run.id) or run
         run.status = "failed"
         run.error_message = str(exc)
         run.finished_at = datetime.now(UTC)
