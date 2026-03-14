@@ -14,7 +14,7 @@ uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 5. First deploy behavior:
 
 ```text
-If the articles table is empty, the backend automatically runs an initial seed for up to 100 articles per brand.
+The backend starts immediately for healthchecks and API traffic. Initial data population should be done via the cron job or by manually running the pipeline command.
 ```
 
 6. Hourly Railway job:
